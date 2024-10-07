@@ -6,7 +6,7 @@ This project applies **Random Forest** classification to analyze and classify ND
 
 This project consists of several folders that contain the necessary data and scripts for the classification process:
 
-- **0_NDVI_Rasters**: Contains NDVI raster images for each month.
+- **0_NDVI_Rasters**: Contains NDVI raster images for each month from Sentinel 2. However, due to their large file sizes, these raster files cannot be shared in this GitHub repository.
 - **1_Training_Samples**: Holds training and testing shapefiles with known crop classes.
 - **2_Outputs**: Stores the output classified raster images and results.
 
