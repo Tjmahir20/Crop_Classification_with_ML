@@ -1,20 +1,23 @@
 # If not installed, you need to install all relevant packages first
-#install.packages("raster", "caret", "randomForest", "sp", "rgdal", "ggplot2")
+#install.packages("raster", "xgboost", "caret", "sp", "rgdal", "ggplot2")
+install.packages("xgboost")
+install.packages("rBayesianOptimization")
+
+
 
 #load libraries
 library(raster)
-library(randomForest)
 library(sp)
 library(rgdal)
-library(ggplot2)
-library(caret)
+library (caret)
+library(xgboost)
+library(rBayesianOptimization)
 set.seed(123)
+
 
 # Setting-up the working directory 
-
-
+# setwd("D://Advanced Image Analysis Lab//05 Random Forest//NDVI_IMAGES_zipped")
 setwd("./0_NDVI_Rasters")
-set.seed(123)
 
 ###### Import images
 NDVI_January21  = "21_01_NDVIBand8ABand4.tif"
@@ -30,7 +33,6 @@ NDVI_October31  = "31_10_NDVIBand8ABand4.tif"
 NDVI_November10  = "10_11_NDVIBand8ABand4.tif"
 NDVI_December12  = "30_12_NDVIBand8ABand4.tif"
 
-#### Stacking of Rasters
 inraster        = stack(NDVI_January21, NDVI_February15,
                         NDVI_March30,NDVI_April19 ,
                         NDVI_May11,NDVI_June28, NDVI_July23,
@@ -38,49 +40,43 @@ inraster        = stack(NDVI_January21, NDVI_February15,
                         NDVI_November10,NDVI_December12)
 
 
-# typeof(inraster)
 inraster
-
-getwd()
-
 
 names(inraster) = c('NDVI_January21', 'NDVI_February15',
                     'NDVI_March30','NDVI_April19' ,
                     'NDVI_May11','NDVI_June28', 'NDVI_July23',
                     'NDVI_August24','NDVI_September21','NDVI_October31',
                     'NDVI_November10','NDVI_December12')
-
-
 #==================================================================================
 # Import training and validation data
-
 
 #==================================================================================
 # Setting-up the working directory 
 setwd('..//1_Training_Samples')
 
 trainingData  =  shapefile("trainingsamplesPnt_NL.shp")
-
-TestingData = shapefile("testingsamplesPnts_NL.shp")
-
+trainingData$Class = as.factor(trainingData$Class)
 summary(trainingData)
-Class_Distribution = as.data.frame(table(trainingData$Class))
-Class_Distribution
 
 barplot(prop.table(table(trainingData$Class)),
         col = rainbow(7),
-        ylim = c(0, 0.6),
+        ylim = c(0, 0.7),
+        main = "Class Distribution")
+
+TestingData = shapefile("testingsamplesPnts_NL.shp")
+TestingData$Class = as.factor(TestingData$Class)
+summary(TestingData)
+
+barplot(prop.table(table(TestingData$Class)),
+        col = rainbow(7),
+        ylim = c(0, 0.7),
         main = "Class Distribution")
 
 #==================================================================================
 # Reducing the Number of Samples (Keeping 10% per class) 
 #==================================================================================
-target_percent <- c(1, 0.9, 0.7, 0.5)
+target_percent <- c(1, 0.9, 0.6, 0.3, 0.2)
 target_percent <- 1
-
-for (i in seq_len(length(target_percent))){
-  print(i)
-}
 
 # Create an empty DataFrame to store reduced datasets
 Reduced_DF <- data.frame(matrix(nrow=1,ncol=3))
@@ -114,102 +110,89 @@ sp_reduced_df <- SpatialPointsDataFrame(Reduced_DF[,c(2,3)], data=as.data.frame(
 names(sp_reduced_df) <- c("Class")
 unique(sp_reduced_df$Class)
 
-### Bar Plot Distribution of sp_reduced_df
-barplot(prop.table(table(sp_reduced_df$Class)),
-        col = rainbow(7),
-        ylim = c(0, 0.6),
-        main = "Resampled Class Distribution")
 
 ### Summary Table of Reduced Dataset
 table(sp_reduced_df$Class)
 table(trainingData$Class)
 
-Class_Distribution = as.data.frame(table(sp_reduced_df$Class))
-Class_Distribution
 
 #==================================================================================
 # Extract raster values for the training samples 
 #==================================================================================
 training_data  = extract(inraster, sp_reduced_df)
-training_response = as.factor(sp_reduced_df$Class)
-# sp_reduced_df$Class
+training_data
+
+#table(data_balanced_over$cls)
 
 #==================================================================================
-#Select the number of input variables(i.e. predictors, features)
+# transforming dataframe into a matrix
 #==================================================================================
-selection<-c(1:12) 
-training_predictors = training_data[,selection] 
+train <- data.matrix(training_data)
+#==================================================================================
+# classes ID starts with 0 (instead of 1)
+#==================================================================================
+training_response = as.numeric (as.factor(sp_reduced_df$Class))-1
+training_response
 
-# selection<-c(3:10)
+training_response = as.numeric(as.factor(sp_reduced_df$Class))-1
+training_response
+
 
 #==================================================================================
-# Train the random forest
+# Training the xgboost model
 #==================================================================================
 
-ntree = 1000    #number of trees to produce per iteration
-mtry = 5       # number of variables used as input to split the variables
-r_forest = randomForest(training_predictors, y=training_response, mtry=mtry, ntree = ntree, keep.forest=TRUE, importance = TRUE, proximity=TRUE) 
+xgb_model <- xgboost(data = train, 
+                   label = training_response,
+                   booster = "gbtree",
+                   eta = 0.1,
+                   gamma = 10,
+                   max_depth = 6, 
+                   min_child_weight = 1,
+                   nround=100, 
+                   objective = "multi:softmax",
+                   num_class = length(unique(training_response)),
+              )
+    
+    
+# summary(xgb_model)
+# mat <- xgb.importance (feature_names = colnames(train),model = xgb_model)
+# xgb.plot.importance (importance_matrix = mat[1:23]) 
+    
+# mat
+# as.data.frame(table(mat))
 
-#===================================================================================
-#Investigate the OOB (Out-Of-the bag) error
-#===================================================================================
-r_forest
-
-#===================================================================================
-# Assessment of variable importance
-#===================================================================================
-imp =importance(r_forest)  #for ALL classes individually
-imp                        #display importance output in console
-varImpPlot(r_forest)
-varUsed(r_forest)
-importance(r_forest)
-
-#=======================================================================================
-#Evaluate the impact of the mtry on the accuracy
-#========================================================================================
-
-mtry <- tuneRF(training_predictors,training_response, ntreeTry=ntree,
-               stepFactor=1.5,improve=0.01, trace=TRUE, plot=TRUE)
-best.m <- mtry[mtry[, 2] == min(mtry[, 2]), 1]
-print(mtry)
-print(best.m)
-
-#======================================================================================
-#Number of tree nodes
-#======================================================================================
-hist(treesize(r_forest), main= "Number of Nodes for the trees",
-     col= "green")
-
-getTree(r_forest, 1, labelVar = TRUE) # inspect the tree characteristics
 
 #==========================================================================================
 # Classify the entire image:define raster data to use for classification
 #=========================================================================================
-predictor_data = subset(inraster, selection)
 
+#change this to your output directory if different 
 setwd('..//2_Outputs')
+
 
 #==========================================================================================
 # Classify the entire image
 #=========================================================================================
 
-predictions = predict(predictor_data, r_forest, format=".tif", overwrite=TRUE, progress="text", type="response") 
+result   <- predict(xgb_model, inraster [1:(nrow(inraster )*ncol(inraster ))])
+res      <- raster(inraster)
+res      <- setValues(res,result+1)
+res
 
 #==========================================================================================
 # Assess the classification accuracy
 #=========================================================================================
 
-Testing=extract(predictions, TestingData) # extracts the value of the classified raster at the validation point locations
-
-
+Testing=extract(res, TestingData) # extracts the value of the classified raster at the validation point locations
 confusionMatrix(as.factor(Testing), as.factor(TestingData$ClassID) )
 
 confusionMatrix(as.factor(Testing), as.factor(TestingData$ClassID) )$byClass[, 1]
+
 confusionMatrix(as.factor(Testing), as.factor(TestingData$ClassID) )$byClass[]
+#==========================================================================================
+# Save the classification results
+#=========================================================================================
 
-# write to a new geotiff file
-path <- '..//2_Outputs'
-rf <- writeRaster(predictions, filename=file.path(path, "classification results.tif"), format="GTiff", overwrite=TRUE)
-
-
+Class_Results = writeRaster(res, 'classification_results_XGBoost.tif', overwrite=TRUE)
 
